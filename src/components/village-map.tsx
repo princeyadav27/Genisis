@@ -1,82 +1,223 @@
 'use client';
-import { useRef, useState } from 'react';
-import { Minus, Plus, LocateFixed, Compass, Layers, Navigation, Eye, Check, X } from 'lucide-react';
-import { type World, type Building, type Resident, type Point } from '@/lib/simulation';
+// Sunhaven village — tile-based isometric pixel-art canvas renderer.
+// Pure presentation layer: every pixel is derived from simulation state (World).
+import React,{useRef,useState} from 'react';
+import type {World,Resident,Building} from '@/lib/simulation';
+import {GRID,TILE_W,TILE_H,ORIGIN,WORLD,iso,foot,unproject,buildTileMap,buildDeco} from './pixel/world';
+import {setSurfaceFactory,bakeTiles,bakeNature,bakeBuildings,bakeProps,bakeCharacter,characterHash,type Surface} from './pixel/sprites';
+import {drawWorld,drawObserver,setCharacter,setSelected,type Frame,View,Assets} from './pixel/renderer';
+import {Check,Compass,Eye,Hammer,Layers,LocateFixed,Minus,Navigation,Plus,X} from 'lucide-react';
 
-export const iso=(x:number,y:number)=>({x:600+(x-y)*12,y:22+(x+y)*6});
-const polygon=(points:Point[])=>points.map(p=>{const q=iso(p.x,p.y);return `${q.x},${q.y}`;}).join(' ');
-const shore=[{x:4,y:19},{x:7,y:10},{x:17,y:4},{x:28,y:3},{x:41,y:7},{x:53,y:14},{x:59,y:24},{x:60,y:34},{x:54,y:46},{x:45,y:54},{x:33,y:59},{x:22,y:57},{x:11,y:49},{x:5,y:38},{x:3,y:28}];
-const noise=(x:number,y:number)=>{let h=Math.imul(Math.round(x*1024)^0x9e3779b9,0x85ebca6b)^Math.imul(Math.round(y*1024),0xc2b2ae35);h=Math.imul(h^(h>>>16),0x85ebca6b);h=Math.imul(h^(h>>>13),0xc2b2ae35);return ((h^(h>>>16))>>>0)/4294967296;};
-function Tree({variant=0}:{variant?:number}){return <g><ellipse cy="7" rx="16" ry="7" fill="#284b35" opacity=".25"/><path d="M-3 6L-2-27 4-27 4 6 1 9Z" fill="#705134"/><path d="M1-18L-9-31M2-23L10-36" stroke="#76573a" strokeWidth="3"/>{variant%3===0?<><path d="M0-66L-17-38-10-38-24-19-15-20-29-1 1 12 28-2 14-21 23-20 10-40 16-40Z" fill="#34694a"/><path d="M0-66L0 10-29-1-15-20-24-19-10-38-17-38Z" fill="#477c49"/><path d="M0-66L16-40 4-44 13-26 2-31 15-9 0-15Z" fill="#568851"/></>:<><path d="M-2-62C-18-64-26-51-23-40-39-28-25-5-11-9-1 4 19-4 21-15 38-23 27-47 16-46 15-59 7-64-2-62Z" fill={variant%2?'#427449':'#4c7d47'}/><path d="M-2-62C-18-64-26-51-23-40C-36-30-25-16-13-18C-18-34-2-34 1-43C16-42 15-57-2-62Z" fill={variant%2?'#60904e':'#729b54'}/><path d="M-16-43C-8-50 2-51 8-43M-24-26Q-15-32-7-26" stroke="#97b367" strokeWidth="2" opacity=".45"/></>}</g>;}
-export function Person({color='#d4a16c',large=false}:{color?:string;large?:boolean}){return <g transform={large?'scale(3.2)':''}><ellipse cy="7" rx="6" ry="3" fill="#243f33" opacity=".3"/><path d="M-3 0L-3 7M3 0L3 7" stroke="#3c4745" strokeWidth="3"/><path d="M-5-12Q0-15 5-12L6 1-6 1Z" fill={color}/><path d="M-6-10L-8-3M6-10L8-3" stroke="#ecc79b" strokeWidth="2.5" strokeLinecap="round"/><ellipse cy="-18" rx="5" ry="6" fill="#edc79c"/><path d="M-5-18Q-8-27 0-26 7-25 5-17L2-23-4-21Z" fill="#664d36"/><path d="M-7-23Q0-29 7-23L10-20Q0-17-10-20Z" fill="#d7b779"/><path d="M-5-25Q0-31 5-25L6-22-6-22Z" fill="#e1c78d"/></g>;}
-function House({kind,selected}:{kind:string;selected:boolean}){const storage=kind==='storage';return <g>
- <ellipse cx="5" cy="15" rx="51" ry="20" fill="#33593d" opacity=".22"/>
- <path d="M-37 7L1 27 43 6 5-14Z" fill="#b9ac86" stroke={selected?'#e1bd78':'#a69976'} strokeWidth={selected?3:1}/>
- <path d="M-34-26L0-9 0 21-34 4Z" fill="#e9d9b1"/><path d="M0-9L39-29 39 2 0 21Z" fill="#c8c2a0"/>
- <path d="M-34 0L0 17 39-2" fill="none" stroke="#b0a287" strokeWidth="3"/>
- <path d="M-34-26L0-9 0-40-17-55Z" fill="#f2dfb5"/>
- <path d="M-43-27L-9-64 37-41 3-4Z" fill={storage?'#92734b':'#b55e43'} stroke="#8d4937" strokeWidth="1"/>
- <path d="M-9-64L37-41 47-27 3-4 0-40Z" fill={storage?'#715c41':'#894738'}/>
- <path d="M-43-27L3-4 47-27" fill="none" stroke={storage?'#b09360':'#dc8c5e'} strokeWidth="3"/>
- {[0,1,2,3,4].map(i=><path key={i} d={`M${-35+i*7} ${-34-i*7}L${10+i*7} ${-11-i*7}`} stroke={storage?'#b49a69':'#ce7b54'} strokeWidth="1" opacity=".8"/>)}
- <path d="M-23-1L-23-18Q-16-23-10-12L-10 6Z" fill="#745c3e"/><path d="M-21 0L-21-15-13-11-13 4Z" fill="#8e754b"/><circle cx="-15" cy="-4" r="1" fill="#ddc188"/>
- <path d="M11-9L22-15 22-5 11 1Z" fill="#4d6b66" stroke="#f1dfb6" strokeWidth="2"/><path d="M16-12L16-2M11-4L22-10" stroke="#dcc79f" strokeWidth="1"/>
- <path d="M-28-57L-28-72-20-76-14-73-14-52Z" fill="#ad9e85"/><path d="M-28-72L-20-68-14-73-21-77Z" fill="#d0bda0"/><path d="M-20-68L-20-54-14-52-14-73Z" fill="#8f8875"/>
- <path d="M-28 12L-13 20-6 16-21 8Z" fill="#d5c7a3"/>
- <g transform="translate(30 9)"><ellipse rx="8" ry="4" fill="#477d45"/><circle cx="-4" cy="-2" r="2" fill="#e9c783"/><circle cx="3" cy="-4" r="2" fill="#d68565"/></g>
- </g>;}
-function Farm({tick}:{tick:number}){return <g><path d="M-70-4L0-39 75-1 5 36Z" fill="#bcac71" stroke="#ddcf9b" strokeWidth="3"/>{Array.from({length:8},(_,r)=><g key={r}><path d={`M${-60+r*9} ${1+r*4.5}l58-29`} stroke="#745d37" strokeWidth="6"/>{Array.from({length:7},(_,c)=>{const x=-56+r*9+c*8,y=1+r*4.5-c*4;return <g key={c} transform={`translate(${x} ${y})`}><path d={`M0 0v-${6+(tick+r)%5}M0-3l-3-3M0-5l3-3`} stroke={(r+Math.floor(tick/8))%4===0?'#c5ad58':'#78933e'} strokeWidth="2"/><ellipse cy="-8" rx="1.5" ry="3" fill={(r+Math.floor(tick/8))%4===0?'#e0c374':'#90ac4c'}/></g>;})}</g>)}<path d="M-73-7L-73 5M-36 12L-36 24M4 29L4 41M41 10L41 23M78-7L78 7M-73 0L4 38 78 1" fill="none" stroke="#b3a179" strokeWidth="3"/></g>;}
-function Well(){return <g><ellipse cy="8" rx="24" ry="12" fill="#b7b293"/><path d="M-18-8L-18 6Q0 23 18 6L18-8Z" fill="#a3a794" stroke="#788c82"/><ellipse cy="-8" rx="18" ry="10" fill="#ccd0b2"/><ellipse cy="-8" rx="11" ry="6" fill="#3b777b"/><path d="M-21 3V-42M21 3V-42" stroke="#8b7449" strokeWidth="4"/><path d="M-29-40L0-60 29-44 1-27Z" fill="#b26443"/><path d="M0-60L29-44 34-38 1-27Z" fill="#8f4e36"/><path d="M-29-40L1-27 34-38" fill="none" stroke="#d49660" strokeWidth="2"/><path d="M0-29V-7" stroke="#8b7551" strokeWidth="1.5"/></g>;}
-function Market(){return <g><ellipse cy="12" rx="32" ry="14" fill="#36583d" opacity=".18"/><path d="M-26-8L1 7 29-8 2-22Z" fill="#c6a06a"/><path d="M-26-8V5L1 19V7M1 19L29 4V-8" fill="#a88958" stroke="#806e4d"/><path d="M-25 3V-35M28 2V-35" stroke="#8b7750" strokeWidth="3"/><path d="M-32-30L-1-49 34-31 2-12Z" fill="#e3c991"/>{[0,1,2].map(i=><path key={i} d={`M${-28+i*12} ${-32+i*6}l28-17 6 3-28 17Z`} fill="#829782"/>)}<path d="M-32-30L2-12 34-31v7L2-5-32-23Z" fill="#b8b184"/>{[-15,0,15].map((x,i)=><g key={x} transform={`translate(${x} ${-6-Math.abs(x)/4})`}><ellipse rx="7" ry="4" fill="#796440"/><circle cy="-3" r="3" fill={['#d17a4a','#b5b761','#d3b15b'][i]}/><circle cx="4" cy="-2" r="2.5" fill="#c7a34b"/></g>)}</g>;}
-function Project({world}:{world:World}){const p=world.project;if(p.complete)return <House kind="storage" selected={false}/>;return <g><path d="M-40 3L1 24 43 3 2-18Z" fill="#b5aa89" stroke="#d3c5a0" strokeWidth="3"/>{[[-34,2],[0,19],[37,2],[3,-15]].map(([x,y],i)=><g key={i}><path d={`M${x} ${y}v-${p.labor>20?45:20}`} stroke="#a08659" strokeWidth="4"/></g>)}{p.labor>0&&<><path d="M-34-43L0-26 37-43 3-60Z" fill="none" stroke="#b49a66" strokeWidth="4"/><path d="M0-26L3-60M-34-43L3-75 37-43" fill="none" stroke="#a1885b" strokeWidth="3"/></>}<path d="M-49 10l16 8 9-5-16-8Z" fill="#8e7047"/><path d="M-49 5l16 8 9-5-16-8Z" fill="#b49660"/><path d="M25 22l9 5 13-7-8-5Z" fill="#9fa497"/></g>;}
-const trees: {x:number;y:number;variant:number}[]=[];
-for(let x=7;x<59;x+=2.6)for(let y=7;y<57;y+=2.8){const n=noise(x,y);if(((x-31)/28)**2+((y-30)/26)**2<.93 && (x<17||y<12||x>49||y>51||(x<23&&y>30&&y<43))&&n>.27)trees.push({x:x+n*1.6,y:y+n,variant:Math.floor(n*10)});}
-const scattered=[{x:19,y:15},{x:33,y:12},{x:45,y:17},{x:47,y:37},{x:42,y:48},{x:26,y:49},{x:19,y:46},{x:26,y:34},{x:35,y:36},{x:21,y:29}];
-scattered.forEach((p,i)=>trees.push({...p,variant:i}));
+export {iso,unproject,ORIGIN,WORLD,TILE_W,TILE_H} from './pixel/world';
+
+const ZOOMS=[.25,.5,1,2,3,4];
+const BUILD_ITEMS:[string,string][]=[['House','home-0'],['Farm','farm'],['Well','well'],['Market','market'],['Barn','storage'],['Workshop','workshop']];
+const buildIcon=(k:string)=>{
+ switch(k){
+  case 'house':return <svg viewBox="0 0 20 20" width="17" height="17" aria-hidden="true"><path d="M3 10L10 4l7 6" fill="none" stroke="currentColor" strokeWidth="1.8"/><path d="M5 9.5V16h10V9.5" fill="none" stroke="currentColor" strokeWidth="1.8"/><rect x="8.4" y="11.5" width="3.2" height="4.5" fill="currentColor"/></svg>;
+  case 'farm':return <svg viewBox="0 0 20 20" width="17" height="17" aria-hidden="true"><path d="M10 17V6" stroke="currentColor" strokeWidth="1.7"/><path d="M10 8L6.5 5M10 11l3.5-3M10 14l-3.5-3" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round"/><path d="M4 17h12" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round"/></svg>;
+  case 'well':return <svg viewBox="0 0 20 20" width="17" height="17" aria-hidden="true"><circle cx="10" cy="12.5" r="5" fill="none" stroke="currentColor" strokeWidth="1.7"/><circle cx="10" cy="12.5" r="2" fill="currentColor"/><path d="M5 10L10 4l5 6" fill="none" stroke="currentColor" strokeWidth="1.7"/></svg>;
+  case 'market':return <svg viewBox="0 0 20 20" width="17" height="17" aria-hidden="true"><path d="M3 7l1.5-3h11L17 7" fill="none" stroke="currentColor" strokeWidth="1.7"/><path d="M3 7c0 1.5 1.5 2 2.5 2s1.5-.5 2-1 1.5-.5 2 0 2 1 3 1S15 8.5 15 7" fill="none" stroke="currentColor" strokeWidth="1.5"/><path d="M5 9.5V16h10V9.5" fill="none" stroke="currentColor" strokeWidth="1.7"/></svg>;
+  case 'barn':return <svg viewBox="0 0 20 20" width="17" height="17" aria-hidden="true"><path d="M3 9L10 4l7 5v8H3Z" fill="none" stroke="currentColor" strokeWidth="1.7"/><path d="M10 8v8M6 9.5l8 7M14 9.5l-8 7" stroke="currentColor" strokeWidth="1.2"/></svg>;
+  case 'workshop':return <svg viewBox="0 0 20 20" width="17" height="17" aria-hidden="true"><path d="M4 16V7l6-3 6 3v9" fill="none" stroke="currentColor" strokeWidth="1.7"/><rect x="7" y="11" width="6" height="5" fill="currentColor"/><path d="M14 7V3h2" fill="none" stroke="currentColor" strokeWidth="1.7"/></svg>;
+ }
+ return null;
+};
+type Hit={id:string;name:string;text:string};
+function clampPan(p:{x:number;y:number},z:number,cw:number,ch:number){
+ const sw=cw/z,sh=ch/z;
+ let x=p.x,y=p.y;
+ if(sw>=WORLD.w)x=WORLD.cx;else x=Math.max(sw/2,Math.min(WORLD.w-sw/2,x));
+ if(sh>=WORLD.h)y=WORLD.cy;else y=Math.max(sh/2,Math.min(WORLD.h-sh/2,y));
+ return {x,y};
+}
+const MINI={w:143,h:81,sc:1.06,oy:2};
+const miniOx=()=>(MINI.w-GRID*MINI.sc)/2;
+
 export default function VillageMap({world,selected,onSelect,follow,onFollow}:{world:World;selected:string|null;onSelect:(id:string)=>void;follow:boolean;onFollow:()=>void}){
- const [zoom,setZoom]=useState(.88);const [pan,setPan]=useState({x:0,y:52});const [labels,setLabels]=useState(true);const [layerOpen,setLayerOpen]=useState(false);const [grid,setGrid]=useState(false);const [hover,setHover]=useState<string|null>(null);const drag=useRef<{x:number;y:number;px:number;py:number;moved:boolean}|null>(null);const svgRef=useRef<SVGSVGElement>(null);
- const followed=follow?world.residents.find(v=>v.id===selected):null;const fp=followed?iso(followed.x,followed.y):null;
- const camera=fp?{x:(600-fp.x)*zoom,y:(390-fp.y)*zoom}:pan;
- const farmLabor=Math.max(0,...world.residents.filter(v=>v.task==='Farming'&&v.x===v.destination.x&&v.y===v.destination.y).map(v=>v.progress));
- const props=[...trees.map((t,i)=>({id:`tree${i}`,depth:t.x+t.y,kind:'tree',data:t})),...world.buildings.map(b=>({id:b.id,depth:b.x+b.y,kind:'building',data:b})),...world.residents.map(v=>({id:v.id,depth:v.x+v.y+.3,kind:'resident',data:v}))].filter(item=>{const p=iso(item.data.x,item.data.y);const sx=(p.x-600)*zoom+600+camera.x,sy=(p.y-390)*zoom+390+camera.y;return sx>-120&&sx<1320&&sy>-120&&sy<900;}).sort((a,b)=>a.depth-b.depth);
- const reset=()=>{setZoom(.88);setPan({x:0,y:52});if(follow)onFollow();};
- return <div className="village-canvas">
- <svg ref={svgRef} className="world-svg" viewBox="0 0 1200 780" preserveAspectRatio="xMidYMid slice" aria-label="Interactive isometric Willowbrook village" onWheel={e=>setZoom(z=>Math.max(.65,Math.min(2.5,z+(e.deltaY<0?.1:-.1))))} onPointerDown={e=>{if((e.target as Element).closest('[data-select]'))return;drag.current={x:e.clientX,y:e.clientY,px:pan.x,py:pan.y,moved:false};e.currentTarget.setPointerCapture(e.pointerId);}} onPointerMove={e=>{if(!drag.current)return;const d=drag.current;const factor=1200/e.currentTarget.getBoundingClientRect().width;d.moved=true;setPan({x:d.px+(e.clientX-d.x)*factor,y:d.py+(e.clientY-d.y)*factor});}} onPointerUp={e=>{if(drag.current&&!drag.current.moved){const matrix=e.currentTarget.getScreenCTM();if(matrix){const point=new DOMPoint(e.clientX,e.clientY).matrixTransform(matrix.inverse());const px=(point.x-camera.x-600)/zoom,py=((point.y-camera.y-390)/zoom+390-22);const tx=Math.floor((px/12+py/6)/2),ty=Math.floor((py/6-px/12)/2);setHover(tx>=0&&tx<64&&ty>=0&&ty<64?`Terrain · Tile ${tx}, ${ty}`:'Coastal water');}}drag.current=null;}}>
- <defs>
-  <linearGradient id="ocean" x2="0" y2="1"><stop stopColor="#295b61"/><stop offset="1" stopColor="#193f49"/></linearGradient>
-  <linearGradient id="land" x2=".8" y2="1"><stop stopColor="#96ab63"/><stop offset="1" stopColor="#728c50"/></linearGradient>
-  <linearGradient id="cliff" x2="0" y2="1"><stop stopColor="#b5ad81"/><stop offset="1" stopColor="#77795f"/></linearGradient>
-  <radialGradient id="vignette"><stop offset=".45" stopColor="#112f34" stopOpacity="0"/><stop offset="1" stopColor="#112f34" stopOpacity=".42"/></radialGradient>
-  <pattern id="waves" width="95" height="65" patternUnits="userSpaceOnUse"><path d="M14 25q9 4 18 0M60 51q6 3 14 0" fill="none" stroke="#94c2b3" strokeWidth="1" opacity=".12"/></pattern>
-  <clipPath id="island-clip"><polygon points={polygon(shore)}/></clipPath>
-  <filter id="land-shadow" x="-30%" y="-30%" width="160%" height="170%"><feDropShadow dx="0" dy="18" stdDeviation="12" floodColor="#102d34" floodOpacity=".35"/></filter>
- </defs>
- <rect width="1200" height="780" fill="url(#ocean)"/><rect width="1200" height="780" fill="url(#waves)" className="water-waves"/>
- <g transform={`translate(${camera.x} ${camera.y}) translate(600 390) scale(${zoom}) translate(-600 -390)`}>
- <polygon points={polygon(shore)} fill="none" stroke="#6b9991" strokeWidth="33" opacity=".16" transform="translate(0 18)"/>
- <polygon points={polygon(shore)} fill="url(#cliff)" stroke="#8c9370" strokeWidth="7" transform="translate(0 19)" filter="url(#land-shadow)"/>
- <polygon points={polygon(shore)} fill="#d0c392" stroke="#b6b48a" strokeWidth="6"/>
- <polygon points={polygon(shore.map(p=>({x:31+(p.x-31)*.97,y:31+(p.y-31)*.97})))} fill="url(#land)"/>
- <g clipPath="url(#island-clip)">{Array.from({length:16},(_,x)=>Array.from({length:16},(_,y)=>{const n=noise(x,y);return <polygon key={`${x}-${y}`} points={polygon([{x:x*4,y:y*4},{x:x*4+4,y:y*4},{x:x*4+4,y:y*4+4},{x:x*4,y:y*4+4}])} fill={n>.5?'#cad08a':'#557747'} opacity={grid?.25:n*.075} stroke={grid?'#d6d69a':'none'} strokeWidth=".5"/>;}))}
- {Array.from({length:230},(_,i)=>{const x=noise(i,3)*60,y=noise(i,7)*60,p=iso(x,y);return <path key={i} d={`M${p.x} ${p.y}l2-3m-2 3l-2-2`} stroke="#d3d29a" strokeWidth="1" opacity=".23"/>;})}
- </g>
- <g fill="none" strokeLinecap="round" strokeLinejoin="round">{[[{x:24,y:14},{x:30,y:20},{x:30,y:43},{x:34,y:47}],[{x:19,y:22},{x:38,y:22},{x:45,y:29}],[{x:19,y:38},{x:23,y:30},{x:43,y:30}],[{x:23,y:44},{x:30,y:40},{x:41,y:40}],[{x:38,y:22},{x:38,y:40}]].map((points,i)=>{const d=points.map((p,j)=>{const q=iso(p.x,p.y);return `${j?'L':'M'}${q.x} ${q.y}`;}).join(' ');return <g key={i}><path d={d} stroke="#a39c66" strokeWidth="19" opacity=".45"/><path d={d} stroke="#c9ba83" strokeWidth="14"/><path d={d} stroke="#e0cea0" strokeWidth="8" opacity=".35"/><path d={d} stroke="#9e9368" strokeWidth=".8" strokeDasharray="1 8"/></g>;})}</g>
- <g transform={`translate(${iso(26,20).x} ${iso(26,20).y}) scale(.62)`}><Farm tick={farmLabor}/></g>
- <g transform={`translate(${iso(19,26).x} ${iso(19,26).y}) scale(.7)`}><Farm tick={farmLabor}/></g>
- {props.map(item=>{const p=iso(item.data.x,item.data.y);if(item.kind==='tree')return <g key={item.id} transform={`translate(${p.x} ${p.y}) scale(${.75+noise(item.data.x,item.data.y)*.3})`} opacity={selected&&world.residents.some(v=>v.id===selected&&Math.abs(v.x-item.data.x)+Math.abs(v.y-item.data.y)<3)?.4:1}><Tree variant={(item.data as typeof trees[number]).variant}/></g>;
- if(item.kind==='building'){const b=item.data as Building;return <g key={b.id} data-select="true" role="button" aria-label={`Inspect ${b.name}`} tabIndex={0} className="map-entity" onClick={()=>onSelect(b.id)} onKeyDown={e=>{if(e.key==='Enter')onSelect(b.id);}} onMouseEnter={()=>setHover(b.name)} onMouseLeave={()=>setHover(null)} transform={`translate(${p.x} ${p.y})`}><title>{b.name}</title>{b.id===selected&&<ellipse rx="48" ry="25" cy="5" fill="#e9cb83" fillOpacity=".15" stroke="#f1d493" strokeDasharray="4 3"/>}{b.type==='farm'?<Farm tick={farmLabor}/>:b.type==='well'?<Well/>:b.type==='market'?<Market/>:b.type==='project'?<Project world={world}/>:<House kind={b.type} selected={selected===b.id}/>}</g>;}
- const v=item.data as Resident;const isSelected=v.id===selected;const talking=world.conversations.findLast(c=>c.speaker===v.id&&world.tick-c.tick<3);return <g key={v.id} transform={`translate(${p.x} ${p.y})`} style={{transform:`translate(${p.x}px,${p.y}px)`,transition:world.status==='running'?`transform ${900/world.speed}ms linear`:'none'}} data-select="true" role="button" tabIndex={0} aria-label={`Inspect ${v.name}`} className="map-entity resident-entity" onClick={()=>onSelect(v.id)} onKeyDown={e=>{if(e.key==='Enter')onSelect(v.id);}} onMouseEnter={()=>setHover(`${v.name} · ${v.task}`)} onMouseLeave={()=>setHover(null)}><title>{`${v.name} · ${v.task}`}</title><circle cy="-9" r="18" fill="transparent"/>{isSelected&&<><ellipse cy="7" rx="13" ry="6" fill="#f7d18a" fillOpacity=".25" stroke="#f4d38f" strokeWidth="1.5"/><path d="M-4-39L0-34 4-39" fill="#f4d38f"/></>}<Person color={v.color}/>{Object.keys(v.carry).length>0&&<path d="M4-10L13-12 16-3 6-1Z" fill="#b8945d" stroke="#755f3e" strokeWidth="1"/>}{talking&&<g transform="translate(0 -44)"><rect x="-15" y="-9" width="30" height="17" rx="6" fill="#f2ebd3"/><path d="M-3 8L0 12 3 8" fill="#f2ebd3"/><text textAnchor="middle" y="3" fill="#42685b" fontSize="12">•••</text></g>}{labels&&isSelected&&<g transform="translate(0 24)"><rect x="-51" y="-8" width="102" height="20" rx="5" fill="#143831" stroke="#cdb67a" strokeWidth=".8"/><text textAnchor="middle" y="6" fill="#efe8ce" fontSize="10" fontWeight="600">{v.name}</text></g>}</g>;
- })}
- {labels&&zoom<1.5&&[{x:19,y:18,text:'SUNFIELD FARM'},{x:35,y:27,text:'VILLAGE SQUARE'},{x:39,y:44,text:world.project.complete?'COMMUNITY STOREHOUSE':'COMMUNITY PROJECT'}].map(l=>{const p=iso(l.x,l.y);return <text key={l.text} x={p.x} y={p.y-20} textAnchor="middle" fill="#f5eacd" fontSize="8" fontWeight="600" letterSpacing="1.8" opacity=".8" style={{paintOrder:'stroke',stroke:'#425c39',strokeWidth:2}}>{l.text}</text>;})}
- </g>
- <rect width="1200" height="780" fill="url(#vignette)" pointerEvents="none"/>
- </svg>
- <div className="map-location"><span className="live-dot"/><span>WILLOWBROOK ISLAND</span><span className="location-divider">/</span><span className="muted">Living Village</span></div>
- <div className="compass"><Compass size={38} strokeWidth={1}/><span>N</span></div>
- {hover&&<div className="map-hover"><Eye size={13}/>{hover}</div>}
- <div className="map-bottom-caption"><span className="live-dot"/>{world.status==='running'?'A living world, unfolding.':'A quiet moment in Willowbrook.'}<span>Seed {world.seed} · 64 × 64</span></div>
- <div className="map-tools"><button title="Zoom in" aria-label="Zoom in" onClick={()=>setZoom(z=>Math.min(2.5,z+.15))}><Plus size={17}/></button><span>{Math.round(zoom*100)}%</span><button title="Zoom out" aria-label="Zoom out" onClick={()=>setZoom(z=>Math.max(.65,z-.15))}><Minus size={17}/></button><i/><button title="Reset camera" aria-label="Reset camera" onClick={reset}><LocateFixed size={17}/></button><button title="Map layers" aria-label="Map layers" className={layerOpen?'active':''} onClick={()=>setLayerOpen(!layerOpen)}><Layers size={17}/></button></div>
- {layerOpen&&<div className="layer-menu"><div>Map layers<button onClick={()=>setLayerOpen(false)} aria-label="Close layers"><X size={13}/></button></div><button onClick={()=>setLabels(!labels)}><span>Village labels</span>{labels&&<Check size={14}/>}</button><button onClick={()=>setGrid(!grid)}><span>Terrain grid</span>{grid&&<Check size={14}/>}</button></div>}
- <button className="minimap" title="Reset to village overview" aria-label="Minimap: reset camera" onClick={reset}><svg viewBox="0 0 150 90"><rect width="150" height="90" fill="#234950"/><g transform="translate(4 0) scale(.12)"><polygon points={polygon(shore)} fill="#728953"/>{trees.map((t,i)=>{const p=iso(t.x,t.y);return <circle key={i} cx={p.x} cy={p.y} r="13" fill="#3e6845"/>;})}{world.buildings.map(b=>{const p=iso(b.x,b.y);return <rect key={b.id} x={p.x-8} y={p.y-8} width="17" height="12" fill="#d5b589"/>;})}<rect x={210-camera.x/zoom} y={135-camera.y/zoom} width={780/zoom} height={480/zoom} fill="none" stroke="#eee0ae" strokeWidth="7" rx="10"/></g></svg><Navigation size={10}/><span>WILLOWBROOK</span></button>
+ const canvasRef=useRef<HTMLCanvasElement>(null);
+ const miniRef=useRef<HTMLCanvasElement>(null);
+ const [zoomIdx,setZoomIdx]=useState(1);
+ const [labels,setLabels]=useState(true);
+ const [grid,setGrid]=useState(false);
+ const [observer,setObserver]=useState(false);
+ const [layerOpen,setLayerOpen]=useState(false);
+ const [buildOpen,setBuildOpen]=useState(true);
+ const [hover,setHover]=useState<string|null>(null);
+ const cam=useRef({x:WORLD.cx,y:WORLD.cy});
+ const zoomRef=useRef(ZOOMS[1]);
+ const dragRef=useRef<{px:number;py:number;cx:number;cy:number;moved:boolean}|null>(null);
+ const stateRef=useRef({world,selected,follow,zoomIdx,labels,grid,observer});
+ React.useEffect(()=>{stateRef.current={world,selected,follow,zoomIdx,labels,grid,observer};},[world,selected,follow,zoomIdx,labels,grid,observer]);
+ const displayRef=useRef<Map<string,{x:number;y:number}>>(new Map());
+
+ // Renderer setup + animation loop (client only; simulation state drives everything)
+ React.useEffect(()=>{
+  const canvas=canvasRef.current;if(!canvas)return;
+  setSurfaceFactory((w,h)=>{const c=document.createElement('canvas');c.width=w;c.height=h;return c as unknown as Surface;});
+  const seed0=stateRef.current.world.seed;
+  const assets:Assets={tiles:bakeTiles(seed0),nature:bakeNature(),buildings:bakeBuildings(),props:bakeProps()};
+  const tiles=buildTileMap();
+  const view:View={tiles,deco:buildDeco(tiles)};
+  const display=new Map<string,{x:number;y:number}>();
+  displayRef.current=display;
+  const worldCanvas=document.createElement('canvas');
+  worldCanvas.width=WORLD.w;worldCanvas.height=WORLD.h;
+  const wg=worldCanvas.getContext('2d')!;
+  const ctx=canvas.getContext('2d')!;
+  let seed=seed0;
+  let lastKey='';
+  const setChars=(w:World)=>{for(const v of w.residents)setCharacter(v.id,bakeCharacter(v.id,characterHash(v.id),v.color,v.role));};
+  setChars(stateRef.current.world);
+  const drawMini=(t:number)=>{
+   const mini=miniRef.current;if(!mini)return;
+   if(mini.width!==MINI.w||mini.height!==MINI.h){mini.width=MINI.w;mini.height=MINI.h;}
+   const s=stateRef.current;
+   const mg=mini.getContext('2d')!;mg.imageSmoothingEnabled=false;
+   mg.fillStyle='#1d4e6b';mg.fillRect(0,0,MINI.w,MINI.h);
+   const ox=miniOx();
+   for(let ty=0;ty<GRID;ty++)for(let tx=0;tx<GRID;tx++){
+    const tt=tiles.get(tx,ty);
+    mg.fillStyle=tt==='water'?'#2e7cb0':tt==='sand'?'#e6cf8f':tt==='plaza'?'#a89f8a':tt==='farm'?'#8a5f33':tt==='road'?'#d8c9a0':tt==='dock'?'#8a6a3a':tt==='bridge'?'#b98a4e':'#7cc24f';
+    mg.fillRect(Math.round(ox+tx*MINI.sc),Math.round(MINI.oy+ty*MINI.sc),Math.ceil(MINI.sc),Math.ceil(MINI.sc));
+   }
+   mg.fillStyle='#3e7a3a';
+   for(const d of view.deco)if(d.kind==='tree')mg.fillRect(Math.round(ox+d.x*MINI.sc)-1,Math.round(MINI.oy+d.y*MINI.sc)-1,2,2);
+   mg.fillStyle='#f0e3b2';
+   for(const b of s.world.buildings)mg.fillRect(Math.round(ox+b.x*MINI.sc)-2,Math.round(MINI.oy+b.y*MINI.sc)-2,4,3);
+   mg.fillStyle='#ffffff';
+   for(const v of s.world.residents){const d=display.get(v.id);if(d)mg.fillRect(Math.round(ox+d.x*MINI.sc),Math.round(MINI.oy+d.y*MINI.sc),2,2);}
+   const z=ZOOMS[s.zoomIdx],cw=canvas.clientWidth||800,ch=canvas.clientHeight||500;
+   const vw=cw/z,vh=ch/z;
+   const cs=[[cam.current.x-vw/2,cam.current.y-vh/2],[cam.current.x+vw/2,cam.current.y-vh/2],[cam.current.x+vw/2,cam.current.y+vh/2],[cam.current.x-vw/2,cam.current.y+vh/2]];
+   mg.strokeStyle='#ffd98a';mg.lineWidth=1;mg.beginPath();
+   cs.forEach(([wx,wy],i)=>{const q=unproject(wx,wy);const px=ox+q.u*MINI.sc,py=MINI.oy+q.v*MINI.sc;i?mg.lineTo(px,py):mg.moveTo(px,py);});
+   mg.closePath();mg.stroke();
+  };
+  const drawFrame=(t:number)=>{
+   const s=stateRef.current;
+   if(s.world.seed!==seed){seed=s.world.seed;assets.tiles=bakeTiles(seed);display.clear();setChars(s.world);lastKey='';}
+   setSelected(s.selected);
+   let moving=false;
+   for(const v of s.world.residents){
+    const d=display.get(v.id)??{x:v.x,y:v.y};
+    if(d.x===v.x&&d.y===v.y){display.set(v.id,d);continue;}
+    d.x+=(v.x-d.x)*.25;d.y+=(v.y-d.y)*.25;
+    if(Math.abs(v.x-d.x)+Math.abs(v.y-d.y)<.03){d.x=v.x;d.y=v.y;}else moving=true;
+    display.set(v.id,d);
+   }
+   const z=ZOOMS[s.zoomIdx];zoomRef.current=z;
+   const followId=s.follow&&s.selected&&s.selected.startsWith('v')?s.selected:null;
+   if(followId){
+    const v=s.world.residents.find(r=>r.id===followId);
+    if(v){const d=display.get(v.id);if(d){const f=foot(d.x,d.y);cam.current.x+=(f.x-cam.current.x)*.25;cam.current.y+=(f.y-cam.current.y)*.25;}}
+   }
+   cam.current=clampPan(cam.current,z,canvas.clientWidth||800,canvas.clientHeight||500);
+   const frame:Frame={t,water:Math.floor(t/900)%2,windmill:Math.floor(t/240)%4,animal:Math.floor(t/1100)%2,boat:Math.floor(t/750)%2};
+   const key=[s.world.tick,frame.water,frame.windmill,frame.animal,frame.boat,Math.floor(t/150)%2,s.selected,s.grid,s.observer,s.labels,z,s.world.project.labor,moving?1:0].join('|');
+   if(key!==lastKey){
+    lastKey=key;
+    drawWorld(wg,s.world,assets,frame,view,display);
+    if(s.labels&&z<1.5){
+     wg.font='bold 9px Arial';wg.textAlign='center';wg.lineWidth=3;wg.strokeStyle='rgba(66,112,58,.85)';
+     const lbl=[{x:19,y:18,t:'SUNFIELD FARM'},{x:35,y:27,t:'SUNHAVEN SQUARE'},{x:39,y:44,t:s.world.project.complete?'COMMUNITY STOREHOUSE':'COMMUNITY PROJECT'}];
+     for(const l of lbl){const p=iso(l.x,l.y);wg.strokeText(l.t,p.x,p.y-18);wg.fillStyle='#f8f2d8';wg.fillText(l.t,p.x,p.y-18);}
+     wg.textAlign='left';
+    }
+    if(s.grid){
+     wg.strokeStyle='rgba(120,200,255,.28)';wg.lineWidth=1;wg.beginPath();
+     for(let i=0;i<=GRID;i+=1){const a=iso(i,0),b=iso(i,GRID),c=iso(0,i),d=iso(GRID,i);wg.moveTo(a.x,a.y);wg.lineTo(b.x,b.y);wg.moveTo(c.x,c.y);wg.lineTo(d.x,d.y);}
+     wg.stroke();
+    }
+    if(s.observer)drawObserver(wg,s.world,frame);
+    drawMini(t);
+   }
+   const cw=canvas.clientWidth,ch=canvas.clientHeight;
+   if(canvas.width!==cw||canvas.height!==ch){canvas.width=cw;canvas.height=ch;}
+   ctx.clearRect(0,0,cw,ch);ctx.imageSmoothingEnabled=false;
+   const sw=cw/z,sh=ch/z;
+   let sx=cam.current.x-sw/2,sy=cam.current.y-sh/2;
+   if(sw>=WORLD.w)sx=(WORLD.w-sw)/2;else sx=Math.max(0,Math.min(WORLD.w-sw,sx));
+   if(sh>=WORLD.h)sy=(WORLD.h-sh)/2;else sy=Math.max(0,Math.min(WORLD.h-sh,sy));
+   ctx.drawImage(worldCanvas,sx,sy,sw,sh,0,0,cw,ch);
+  };
+  let raf=0;
+  const loop=(t:number)=>{drawFrame(t);raf=requestAnimationFrame(loop);};
+  raf=requestAnimationFrame(loop);
+  return ()=>{cancelAnimationFrame(raf);};
+ },[]);
+
+ const toWorld=(clientX:number,clientY:number)=>{
+  const canvas=canvasRef.current!;
+  const rect=canvas.getBoundingClientRect();
+  const z=zoomRef.current;
+  return {x:cam.current.x+(clientX-rect.left-rect.width/2)/z,y:cam.current.y+(clientY-rect.top-rect.height/2)/z,rect};
+ };
+ const pick=(wx:number,wy:number):Hit|null=>{
+  const s=stateRef.current;
+  const display=displayRef.current;
+  for(const v of s.world.residents){const d=display.get(v.id);if(!d)continue;const f=foot(d.x,d.y);if(Math.hypot(f.x-wx,f.y-wy)<9)return {id:v.id,name:v.name,text:`${v.name} · ${v.task}`};}
+  for(const b of s.world.buildings){const f=foot(b.x,b.y);if(Math.hypot(f.x-wx,f.y-wy)<17)return {id:b.id,name:b.name,text:b.name};}
+  return null;
+ };
+ const zoomTo=(idx:number,ax?:number,ay?:number)=>{
+  const canvas=canvasRef.current;if(!canvas)return;
+  const s=stateRef.current;
+  idx=Math.max(0,Math.min(ZOOMS.length-1,idx));
+  const z0=ZOOMS[s.zoomIdx],z1=ZOOMS[idx];
+  const rect=canvas.getBoundingClientRect();
+  const px=ax??rect.width/2,py=ay??rect.height/2;
+  const wx=cam.current.x+(px-rect.width/2)/z0,wy=cam.current.y+(py-rect.height/2)/z0;
+  cam.current=clampPan({x:wx-(px-rect.width/2)/z1,y:wy-(py-rect.height/2)/z1},z1,canvas.clientWidth,canvas.clientHeight);
+  setZoomIdx(idx);
+ };
+ const reset=()=>{setZoomIdx(1);cam.current={x:WORLD.cx,y:WORLD.cy};zoomRef.current=ZOOMS[1];if(follow)onFollow();};
+ const onMiniClick=(e:React.MouseEvent)=>{
+  const mini=miniRef.current;if(!mini)return;
+  const rect=mini.getBoundingClientRect();
+  const mx=(e.clientX-rect.left)/rect.width*MINI.w,my=(e.clientY-rect.top)/rect.height*MINI.h;
+  const q={u:(mx-miniOx())/MINI.sc,v:(my-MINI.oy)/MINI.sc};
+  const p=iso(q.u,q.v);
+  cam.current=clampPan(p,zoomRef.current,canvasRef.current?.clientWidth||800,canvasRef.current?.clientHeight||500);
+  if(follow)onFollow();
+ };
+ return <div className={`village-canvas ${observer?'observer-mode':''}`}>
+  <canvas ref={canvasRef} className="world-canvas" aria-label="Interactive isometric Sunhaven village"
+   onWheel={e=>{const r=e.currentTarget.getBoundingClientRect();zoomTo(stateRef.current.zoomIdx+(e.deltaY<0?1:-1),e.clientX-r.left,e.clientY-r.top);}}
+   onPointerDown={e=>{dragRef.current={px:e.clientX,py:e.clientY,cx:cam.current.x,cy:cam.current.y,moved:false};e.currentTarget.setPointerCapture(e.pointerId);}}
+   onPointerMove={e=>{
+    const d=dragRef.current;
+    if(d){
+     if(Math.abs(e.clientX-d.px)+Math.abs(e.clientY-d.py)>3)d.moved=true;
+     if(d.moved){const z=zoomRef.current;cam.current=clampPan({x:d.cx-(e.clientX-d.px)/z,y:d.cy-(e.clientY-d.py)/z},z,e.currentTarget.clientWidth,e.currentTarget.clientHeight);setHover(null);}
+     return;
+    }
+    const w=toWorld(e.clientX,e.clientY);
+    const hit=pick(w.x,w.y);
+    if(hit)setHover(hit.text);
+   }}
+   onPointerUp={e=>{
+    const d=dragRef.current;dragRef.current=null;
+    if(!d||d.moved)return;
+    const w=toWorld(e.clientX,e.clientY);
+    const hit=pick(w.x,w.y);
+    if(hit){onSelect(hit.id);return;}
+    const q=unproject(w.x,w.y);
+    const tx=Math.floor(q.u),ty=Math.floor(q.v);
+    setHover(tx>=0&&tx<GRID&&ty>=0&&ty<GRID?`Terrain · Tile ${tx}, ${ty}`:'Coastal water');
+   }}
+   onPointerLeave={()=>{setHover(null);dragRef.current=null;}}/>
+  <div className="map-location"><span className="live-dot"/><span>SUNHAVEN ISLAND</span><span className="location-divider">/</span><span className="muted">Living Village</span></div>
+  <div className="compass"><Compass size={38} strokeWidth={1}/><span>N</span></div>
+  {hover&&<div className="map-hover"><Eye size={13}/>{hover}</div>}
+  <div className="map-bottom-caption"><span className="live-dot"/>{world.status==='running'?'A living world, unfolding.':'A quiet moment in Sunhaven.'}<span>Seed {world.seed} · 64 × 64 · Tile {TILE_W}×{TILE_H}</span></div>
+  <div className="build-menu">
+   <button className="build-menu-head" onClick={()=>setBuildOpen(!buildOpen)} aria-expanded={buildOpen}><Hammer size={14}/><span>BUILD</span><ChevronIcon open={buildOpen}/></button>
+   {buildOpen&&<div className="build-grid">{BUILD_ITEMS.map(([label,id])=><button key={id} className="build-item" title={`Inspect ${label.toLowerCase()} in the village`} aria-label={`Inspect ${label}`} onClick={()=>onSelect(id)}>{buildIcon(label.toLowerCase())}<span>{label}</span></button>)}</div>}
+  </div>
+  <div className="map-tools"><button title="Zoom in" aria-label="Zoom in" onClick={()=>zoomTo(zoomIdx+1)}><Plus size={17}/></button><span>{Math.round(ZOOMS[zoomIdx]*100)}%</span><button title="Zoom out" aria-label="Zoom out" onClick={()=>zoomTo(zoomIdx-1)}><Minus size={17}/></button><i/><button title="Reset camera" aria-label="Reset camera" onClick={reset}><LocateFixed size={17}/></button><button title="Map layers" aria-label="Map layers" className={layerOpen?'active':''} onClick={()=>setLayerOpen(!layerOpen)}><Layers size={17}/></button></div>
+  {layerOpen&&<div className="layer-menu"><div>Map layers<button onClick={()=>setLayerOpen(false)} aria-label="Close layers"><X size={13}/></button></div><button onClick={()=>setLabels(!labels)}><span>Village labels</span>{labels&&<Check size={14}/>}</button><button onClick={()=>setGrid(!grid)}><span>Terrain grid</span>{grid&&<Check size={14}/>}</button><button onClick={()=>setObserver(!observer)}><span>Observer mode</span>{observer&&<Check size={14}/>}</button></div>}
+  <button className="minimap" title="Minimap: center camera" aria-label="Minimap: center camera" onClick={onMiniClick}><canvas ref={miniRef} width={MINI.w} height={MINI.h}/><Navigation size={10}/><span>SUNHAVEN</span></button>
  </div>;
 }
+function ChevronIcon({open}:{open:boolean}){return <svg viewBox="0 0 12 12" width="11" height="11" aria-hidden="true" style={{transform:open?'none':'rotate(-90deg)',transition:'transform .18s'}}><path d="M2 4l4 4 4-4" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"/></svg>;}

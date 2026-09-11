@@ -16,7 +16,7 @@ test('village overview, resident follow, lifecycle controls and inspectors',asyn
  const errors:string[]=[];page.on('pageerror',e=>errors.push(e.message));page.on('console',m=>{if(m.type()==='error')errors.push(m.text());});
  await request.post('/api/world',{data:{command:'reset'}});await page.goto('/');
  await expect(page.getByText('Connected to village',{exact:true})).toBeVisible();
- await expect(page.getByRole('heading',{name:'Willowbrook'})).toBeVisible();
+ await expect(page.getByRole('heading',{name:'Sunhaven'})).toBeVisible();
  await expect(page.getByRole('heading',{name:'Elara Reed',exact:true})).toBeVisible();
  await mkdir('artifacts',{recursive:true});await page.screenshot({path:'artifacts/overview-1366.png'});
  await page.getByRole('button',{name:'Start simulation',exact:true}).click();await expect(page.getByRole('button',{name:'Pause simulation',exact:true})).toBeVisible();
@@ -27,11 +27,12 @@ test('village overview, resident follow, lifecycle controls and inspectors',asyn
  await page.getByRole('button',{name:'Follow villager',exact:true}).click();await expect(page.getByRole('button',{name:'Following Elara',exact:true})).toBeVisible();
  await page.getByRole('button',{name:'Zoom in',exact:true}).click();await page.getByRole('button',{name:'Zoom in',exact:true}).click();await page.screenshot({path:'artifacts/resident-inspection-1366.png'});
  await page.getByRole('button',{name:'Reset camera',exact:true}).click();
- for(const z of [.88,1.03]){if(z>1)await page.getByRole('button',{name:'Zoom in',exact:true}).click();const point=await page.locator('.world-svg').evaluate((el,z)=>{const svg=el as SVGSVGElement;return new DOMPoint((600+(31.2-35.2)*12-600)*z+600,((22+(31.2+35.2)*6)-390)*z+390+52).matrixTransform(svg.getScreenCTM()!).toJSON();},z);await page.mouse.click(point.x,point.y);await expect(page.getByText('Terrain · Tile 31, 35',{exact:true})).toBeVisible();}
+ // Canvas camera: default zoom 0.5 centered on the world; the zoom-in button steps to 1.0 (camera stays centered).
+ for(const z of [.5,1]){if(z>1)await page.getByRole('button',{name:'Zoom in',exact:true}).click();const point=await page.locator('.world-canvas').evaluate((el,z)=>{const c=el as HTMLCanvasElement;const r=c.getBoundingClientRect();const TW=32,TH=16,MARGIN=6;const ORX=MARGIN*TW+48,ORY=72;const wx=ORX+(31.2-35.2)*(TW/2),wy=ORY+(31.2+35.2)*(TH/2);const cx=ORX,cy=ORY+64*(TH/2)+8;return{x:r.left+(wx-cx)*z+r.width/2,y:r.top+(wy-cy)*z+r.height/2};},z);await page.mouse.click(point.x,point.y);await expect(page.getByText('Terrain · Tile 31, 35',{exact:true})).toBeVisible();}
  await page.getByRole('button',{name:'Reset camera',exact:true}).click();await page.getByRole('button',{name:'Map layers',exact:true}).click();await page.getByRole('button',{name:'Terrain grid',exact:true}).click();await page.getByRole('button',{name:'Close layers',exact:true}).click();
  await page.getByRole('button',{name:'Projects',exact:true}).click();await expect(page.getByText('Building, together')).toBeVisible();await expect(page.getByText('Wood delivered')).toBeVisible();
  await page.getByRole('button',{name:'Economy',exact:true}).click();await expect(page.getByText('The village economy')).toBeVisible();
- await page.getByRole('button',{name:'Agents',exact:true}).click();await expect(page.getByRole('button',{name:/Observer & Advisor Causal record/})).toBeVisible();
+ await page.getByRole('button',{name:'Agents',exact:true}).click();await expect(page.getByRole('button',{name:/Advisor Analyzes, guides, suggests/})).toBeVisible();
  await page.getByRole('button',{name:'Village',exact:true}).click();await page.getByRole('button',{name:'All events',exact:true}).click();await page.locator('.event-row').first().click();await expect(page.getByRole('dialog',{name:'Causal event inspector'})).toBeVisible();await page.getByRole('button',{name:'Close event',exact:true}).click();
  await page.setViewportSize({width:1920,height:1080});await page.screenshot({path:'artifacts/overview-1920.png'});await page.getByRole('button',{name:'Zoom in',exact:true}).click();await page.getByRole('button',{name:'Zoom in',exact:true}).click();await page.getByRole('button',{name:'Zoom in',exact:true}).click();await page.screenshot({path:'artifacts/street-1920.png'});
  expect(errors).toEqual([]);await request.post('/api/world',{data:{command:'reset'}});
