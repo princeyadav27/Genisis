@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { createWorld, advance, applyCommand } from '../src/lib/simulation';
+import { createWorld, advance, applyCommand, friendshipTier } from '../src/lib/simulation';
 
 test('seeded 1000-tick continuation is deterministic and respects physical invariants',()=>{
  const a=createWorld(42),b=createWorld(42);a.status=b.status='running';let completed=false;
@@ -25,4 +25,34 @@ test('resource ledgers reconcile sources, sinks, carried stocks and project mate
  assert.equal(w.forest+w.stocks.wood+w.project.wood+w.residents.reduce((n,v)=>n+(v.carry.wood||0),0),2464);
  assert.equal(w.stocks.stone+w.project.stone+w.residents.reduce((n,v)=>n+(v.carry.stone||0),0),40);
  }
+});
+test('social: greetings deepen relationships, friendship tiers and conversation records',()=>{
+ const w=createWorld(7);
+ const a=w.residents[0],b=w.residents[1];
+ // b sits just outside the passing-greet band (2.5 > 2.4) but inside the
+ // nearby-greet radius (<3), so only the forced work-site greetings count.
+ const setup=()=>{for(const r of w.residents)if(r!==a&&r!==b){r.x=0;r.y=0;}a.task='Drinking';a.destination={x:38,y:30};a.x=38;a.y=30;a.progress=0;b.x=40.5;b.y=30;b.progress=0;};
+ for(let k=0;k<3;k++){while(w.tick%3!==2)advance(w,true);setup();advance(w,true);}
+ assert.ok((a.relationships[b.id]||0)>=3,'nearby greetings deepen the relationship');
+ assert.ok(w.events.some(e=>e.kind==='social'&&e.title.includes('became friends')),'friendship event at three shared greetings');
+ assert.ok(w.conversations.some(c=>c.recipient===b.id&&c.outcome.includes('nearby')),'conversation record with outcome');
+ assert.equal(friendshipTier(3),'friend');
+});
+test('social: close bonds add a bounded wellbeing bonus',()=>{
+ const w1=createWorld(7),w2=createWorld(7);
+ w1.residents[0].relationships['v2']=6;
+ advance(w1,true);advance(w2,true);
+ assert.ok(w1.residents[0].mood>w2.residents[0].mood,'close friend bonus raises mood');
+ assert.equal(friendshipTier(6),'close friend');
+});
+test('social: crossing-path greetings and the periodic village report are deterministic',()=>{
+ const w=createWorld(7);w.status='running';
+ for(let i=0;i<40;i++)advance(w);
+ assert.ok(w.conversations.some(c=>c.outcome.includes('passing')),'passing greetings happen on the street, not only at work sites');
+ assert.ok(w.events.some(e=>e.title==='Village social report'),'village social report committed at tick 36');
+ for(const e of w.events.filter(e=>e.kind==='social'&&e.actor))assert.notEqual(e.actor,e.target,'no resident greets themselves');
+ for(const v of w.residents)assert.ok(!v.relationships[v.id],'no self-relationship');
+ const w2=createWorld(7);w2.status='running';
+ for(let i=0;i<40;i++)advance(w2);
+ assert.equal(JSON.stringify(w.events),JSON.stringify(w2.events),'social layer is deterministic (no Math.random)');
 });
